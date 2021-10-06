@@ -19,6 +19,12 @@
 <resources>
     <!-- Screen Record -->
     <dimen name="screenrecord_dot_size">48dp</dimen>
+    
+    <!-- Color of the UDFPS pressed view -->
+    <color name="config_udfpsColor">#ffffffff</color>
+
+    <!-- Doze: does the double tap sensor need a proximity check? -->
+    <bool name="doze_double_tap_proximity_check">false</bool>
 
     <!-- HD calling icon -->
     <dimen name="signal_icon_viewport_size">24dp</dimen>
