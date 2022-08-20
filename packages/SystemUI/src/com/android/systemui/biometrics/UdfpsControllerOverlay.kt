@@ -223,32 +223,33 @@ constructor(
             sensorBounds = Rect(params.sensorBounds)
             try {
                 if (DeviceEntryUdfpsRefactor.isEnabled) {
-                    overlayTouchView =
-                        (inflater.inflate(R.layout.udfps_touch_overlay, null, false)
-                                as UdfpsTouchOverlay)
-                            .apply {
-                                // This view overlaps the sensor area
-                                // prevent it from being selectable during a11y
-                                if (requestReason.isImportantForAccessibility()) {
-                                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                                }
+                    overlayTouchView = (inflater.inflate(
+                            R.layout.udfps_touch_overlay, null, false
+                    ) as UdfpsTouchOverlay).apply {
+                        setUdfpsDisplayModeProvider(udfpsDisplayModeProvider)
+                        // This view overlaps the sensor area
+                        // prevent it from being selectable during a11y
+                        if (requestReason.isImportantForAccessibility()) {
+                            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                        }
 
-                                addViewNowOrLater(this, null)
-                                when (requestReason) {
-                                    REASON_AUTH_KEYGUARD ->
-                                        UdfpsTouchOverlayBinder.bind(
-                                            view = this,
-                                            viewModel = deviceEntryUdfpsTouchOverlayViewModel.get(),
-                                            udfpsOverlayInteractor = udfpsOverlayInteractor,
-                                        )
-                                    else ->
-                                        UdfpsTouchOverlayBinder.bind(
-                                            view = this,
-                                            viewModel = defaultUdfpsTouchOverlayViewModel.get(),
-                                            udfpsOverlayInteractor = udfpsOverlayInteractor,
-                                        )
-                                }
-                            }
+                        addViewNowOrLater(this, null)
+                        when (requestReason) {
+                            REASON_AUTH_KEYGUARD ->
+                                UdfpsTouchOverlayBinder.bind(
+                                    view = this,
+                                    viewModel = deviceEntryUdfpsTouchOverlayViewModel.get(),
+                                    udfpsOverlayInteractor = udfpsOverlayInteractor,
+                                )
+                            else ->
+                                UdfpsTouchOverlayBinder.bind(
+                                    view = this,
+                                    viewModel = defaultUdfpsTouchOverlayViewModel.get(),
+                                    udfpsOverlayInteractor = udfpsOverlayInteractor,
+                                )
+                        }
+                        sensorRect = sensorBounds
+                    }
                 } else {
                     overlayViewLegacy =
                         (inflater.inflate(R.layout.udfps_view, null, false) as UdfpsView).apply {
@@ -454,6 +455,11 @@ constructor(
                 unconfigureDisplay()
             }
             animationViewController = null
+        }
+        overlayTouchView?.apply {
+            if (isDisplayConfigured) {
+                unconfigureDisplay()
+            }
         }
         if (DeviceEntryUdfpsRefactor.isEnabled) {
             udfpsDisplayModeProvider.disable(null)
