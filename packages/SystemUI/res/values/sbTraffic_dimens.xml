@@ -17,4 +17,10 @@
 <resources>
     <!-- Network traffic -->
     <dimen name="network_traffic_width">25sp</dimen>
+
+    <!-- Charging info current divider, if needed -->
+    <integer name="config_currentInfoDivider" translatable="false">1000</integer>
+
+    <!-- Udfps vendor code -->
+    <integer name="config_udfpsVendorCode">0</integer>
 </resources>
