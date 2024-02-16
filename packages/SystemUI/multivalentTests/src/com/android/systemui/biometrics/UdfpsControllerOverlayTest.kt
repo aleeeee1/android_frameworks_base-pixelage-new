@@ -47,6 +47,7 @@ import com.android.systemui.biometrics.ui.viewmodel.DefaultUdfpsTouchOverlayView
 import com.android.systemui.biometrics.ui.viewmodel.DeviceEntryUdfpsTouchOverlayViewModel
 import com.android.systemui.bouncer.domain.interactor.AlternateBouncerInteractor
 import com.android.systemui.bouncer.domain.interactor.PrimaryBouncerInteractor
+import com.android.systemui.classifier.FalsingCollector
 import com.android.systemui.dump.DumpManager
 import com.android.systemui.keyguard.data.repository.FakeKeyguardTransitionRepository
 import com.android.systemui.keyguard.data.repository.fakeKeyguardTransitionRepository
@@ -64,6 +65,7 @@ import com.android.systemui.power.shared.model.WakefulnessState
 import com.android.systemui.res.R
 import com.android.systemui.shade.domain.interactor.ShadeInteractor
 import com.android.systemui.statusbar.LockscreenShadeTransitionController
+import com.android.systemui.statusbar.phone.ScreenOffAnimationController
 import com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager
 import com.android.systemui.statusbar.phone.SystemUIDialogManager
 import com.android.systemui.statusbar.phone.UnlockedScreenOffAnimationController
@@ -74,6 +76,7 @@ import com.android.systemui.user.domain.interactor.SelectedUserInteractor
 import com.google.common.truth.Truth.assertThat
 import dagger.Lazy
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -329,12 +332,12 @@ class UdfpsControllerOverlayTest : SysuiTestCase() {
     fun showUdfpsOverlay_awake() =
         testScope.runTest {
             withReason(REASON_AUTH_KEYGUARD) {
+                mSetFlagsRule.enableFlags(Flags.FLAG_UDFPS_VIEW_PERFORMANCE)
                 powerRepository.updateWakefulness(
                     rawState = WakefulnessState.AWAKE,
                     lastWakeReason = WakeSleepReason.POWER_BUTTON,
                     lastSleepReason = WakeSleepReason.OTHER,
                 )
-                runCurrent()
                 controllerOverlay.show(udfpsController, overlayParams)
                 runCurrent()
                 verify(windowManager).addView(any(), any())
@@ -344,24 +347,15 @@ class UdfpsControllerOverlayTest : SysuiTestCase() {
     @Test
     fun showUdfpsOverlay_whileGoingToSleep() =
         testScope.runTest {
-            withReasonSuspend(REASON_AUTH_KEYGUARD) {
-                keyguardTransitionRepository.sendTransitionSteps(
-                    from = KeyguardState.OFF,
-                    to = KeyguardState.GONE,
-                    testScope = this,
-                )
+            withReason(REASON_AUTH_KEYGUARD) {
+                mSetFlagsRule.enableFlags(Flags.FLAG_UDFPS_VIEW_PERFORMANCE)
                 powerRepository.updateWakefulness(
                     rawState = WakefulnessState.STARTING_TO_SLEEP,
                     lastWakeReason = WakeSleepReason.POWER_BUTTON,
                     lastSleepReason = WakeSleepReason.OTHER,
                 )
-                runCurrent()
-
-                // WHEN a request comes to show the view
                 controllerOverlay.show(udfpsController, overlayParams)
                 runCurrent()
-
-                // THEN the view does not get added immediately
                 verify(windowManager, never()).addView(any(), any())
 
                 // we hide to end the job that listens for the finishedGoingToSleep signal
@@ -370,79 +364,25 @@ class UdfpsControllerOverlayTest : SysuiTestCase() {
         }
 
     @Test
-    fun showUdfpsOverlay_whileAsleep() =
+    fun showUdfpsOverlay_afterFinishedGoingToSleep() =
         testScope.runTest {
-            withReasonSuspend(REASON_AUTH_KEYGUARD) {
-                keyguardTransitionRepository.sendTransitionSteps(
-                    from = KeyguardState.OFF,
-                    to = KeyguardState.GONE,
-                    testScope = this,
+            withReason(REASON_AUTH_KEYGUARD) {
+                mSetFlagsRule.enableFlags(Flags.FLAG_UDFPS_VIEW_PERFORMANCE)
+                powerRepository.updateWakefulness(
+                    rawState = WakefulnessState.STARTING_TO_SLEEP,
+                    lastWakeReason = WakeSleepReason.POWER_BUTTON,
+                    lastSleepReason = WakeSleepReason.OTHER,
                 )
+                controllerOverlay.show(udfpsController, overlayParams)
+                runCurrent()
+                verify(windowManager, never()).addView(any(), any())
+
                 powerRepository.updateWakefulness(
                     rawState = WakefulnessState.ASLEEP,
                     lastWakeReason = WakeSleepReason.POWER_BUTTON,
                     lastSleepReason = WakeSleepReason.OTHER,
                 )
                 runCurrent()
-
-                // WHEN a request comes to show the view
-                controllerOverlay.show(udfpsController, overlayParams)
-                runCurrent()
-
-                // THEN view isn't added yet
-                verify(windowManager, never()).addView(any(), any())
-
-                // we hide to end the job that listens for the finishedGoingToSleep signal
-                controllerOverlay.hide()
-            }
-        }
-
-    @Test
-    fun neverRemoveViewThatHasNotBeenAdded() =
-        testScope.runTest {
-            withReasonSuspend(REASON_AUTH_KEYGUARD) {
-                controllerOverlay.show(udfpsController, overlayParams)
-                val view = controllerOverlay.getTouchOverlay()
-                view?.let {
-                    // parent is null, signalling that the view was never added
-                    whenever(view.parent).thenReturn(null)
-                }
-                verify(windowManager, never()).removeView(eq(view))
-            }
-        }
-
-    @Test
-    fun showUdfpsOverlay_afterFinishedTransitioningToAOD() =
-        testScope.runTest {
-            withReasonSuspend(REASON_AUTH_KEYGUARD) {
-                keyguardTransitionRepository.sendTransitionSteps(
-                    from = KeyguardState.OFF,
-                    to = KeyguardState.GONE,
-                    testScope = this,
-                )
-                powerRepository.updateWakefulness(
-                    rawState = WakefulnessState.STARTING_TO_SLEEP,
-                    lastWakeReason = WakeSleepReason.POWER_BUTTON,
-                    lastSleepReason = WakeSleepReason.OTHER,
-                )
-                runCurrent()
-
-                // WHEN a request comes to show the view
-                controllerOverlay.show(udfpsController, overlayParams)
-                runCurrent()
-
-                // THEN the view does not get added immediately
-                verify(windowManager, never()).addView(any(), any())
-
-                // WHEN the device finishes transitioning to AOD
-                keyguardTransitionRepository.sendTransitionSteps(
-                    from = KeyguardState.GONE,
-                    to = KeyguardState.AOD,
-                    testScope = this,
-                )
-                runCurrent()
-
-                // THEN the view gets added
                 verify(windowManager)
                     .addView(eq(controllerOverlay.getTouchOverlay()), layoutParamsCaptor.capture())
             }

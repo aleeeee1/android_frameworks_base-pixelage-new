@@ -46,6 +46,7 @@ import androidx.annotation.LayoutRes
 import androidx.annotation.VisibleForTesting
 import com.android.app.viewcapture.ViewCaptureAwareWindowManager
 import com.android.keyguard.KeyguardUpdateMonitor
+import com.android.systemui.Flags.udfpsViewPerformance
 import com.android.systemui.animation.ActivityTransitionAnimator
 import com.android.systemui.biometrics.domain.interactor.UdfpsOverlayInteractor
 import com.android.systemui.biometrics.shared.model.UdfpsOverlayParams
@@ -62,6 +63,7 @@ import com.android.systemui.keyguard.domain.interactor.KeyguardTransitionInterac
 import com.android.systemui.keyguard.shared.model.KeyguardState
 import com.android.systemui.plugins.statusbar.StatusBarStateController
 import com.android.systemui.power.domain.interactor.PowerInteractor
+import com.android.systemui.power.shared.model.WakefulnessState
 import com.android.systemui.res.R
 import com.android.systemui.shade.domain.interactor.ShadeInteractor
 import com.android.systemui.statusbar.LockscreenShadeTransitionController
@@ -132,6 +134,14 @@ constructor(
             }
             .map {} // map to Unit
     private var listenForCurrentKeyguardState: Job? = null
+
+    private val isFinishedGoingToSleep: Flow<Unit> =
+        powerInteractor.detailedWakefulness.filter { 
+            it.internalWakefulnessState == WakefulnessState.ASLEEP
+        }
+        .map { } // map to Unit
+    private var listenForAsleepJob: Job? = null
+
     private var addViewRunnable: Runnable? = null
     private var overlayViewLegacy: UdfpsView? = null
         private set
@@ -288,24 +298,44 @@ constructor(
     }
 
     private fun addViewNowOrLater(view: View, animation: UdfpsAnimationViewController<*>?) {
-        addViewRunnable =
-            kotlinx.coroutines.Runnable {
+        if (udfpsViewPerformance()) {
+            addViewRunnable = kotlinx.coroutines.Runnable {
                 Trace.setCounter("UdfpsAddView", 1)
-                windowManager.addView(view, coreLayoutParams.updateDimensions(animation))
+                windowManager.addView(
+                        view,
+                        coreLayoutParams.updateDimensions(animation)
+                )
             }
-        if (powerInteractor.detailedWakefulness.value.isAwake()) {
-            // Device is awake, so we add the view immediately.
-            addViewIfPending()
+            if (powerInteractor.detailedWakefulness.value.internalWakefulnessState
+                    != WakefulnessState.STARTING_TO_SLEEP) {
+                addViewIfPending()
+            } else {
+                listenForAsleepJob?.cancel()
+                listenForAsleepJob = scope.launch {
+                    isFinishedGoingToSleep.collect {
+                        addViewIfPending()
+                    }
+                }
+
+                listenForCurrentKeyguardState?.cancel()
+                listenForCurrentKeyguardState = scope.launch { 
+                    currentStateUpdatedToOffAodOrDozing.collect { 
+                        addViewIfPending()
+                    }
+                }
+            }
         } else {
-            listenForCurrentKeyguardState?.cancel()
-            listenForCurrentKeyguardState =
-                scope.launch { currentStateUpdatedToOffAodOrDozing.collect { addViewIfPending() } }
+            windowManager.addView(
+                    view,
+                    coreLayoutParams.updateDimensions(animation)
+            )
         }
     }
 
     private fun addViewIfPending() {
         addViewRunnable?.let {
             listenForCurrentKeyguardState?.cancel()
+            listenForAsleepJob?.cancel()
             it.run()
         }
         addViewRunnable = null
@@ -444,6 +474,7 @@ constructor(
         overlayTouchView = null
         overlayTouchListener = null
         listenForCurrentKeyguardState?.cancel()
+        listenForAsleepJob?.cancel()
 
         return wasShowing
     }
