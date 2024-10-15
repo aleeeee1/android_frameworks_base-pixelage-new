@@ -167,28 +167,33 @@ constructor(
 
     private var overlayTouchListener: TouchExplorationStateChangeListener? = null
 
-    private val coreLayoutParams =
-        WindowManager.LayoutParams(
-                WindowManager.LayoutParams.TYPE_NAVIGATION_BAR_PANEL,
-                0 /* flags set in computeLayoutParams() */,
-                PixelFormat.TRANSLUCENT
-            )
-            .apply {
-                title = TAG
-                fitInsetsTypes = 0
-                gravity = android.view.Gravity.TOP or android.view.Gravity.LEFT
-                layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                flags =
-                    (Utils.FINGERPRINT_OVERLAY_LAYOUT_PARAM_FLAGS or
-                        WindowManager.LayoutParams.FLAG_SPLIT_TOUCH)
-                privateFlags =
-                    WindowManager.LayoutParams.PRIVATE_FLAG_TRUSTED_OVERLAY or
-                        WindowManager.LayoutParams.PRIVATE_FLAG_EXCLUDE_FROM_SCREEN_MAGNIFICATION
-                // Avoid announcing window title.
-                accessibilityTitle = " "
-                inputFeatures = WindowManager.LayoutParams.INPUT_FEATURE_SPY
-            }
+    private val useFrameworkDimming = context.resources.getBoolean(
+        com.android.systemui.res.R.bool.config_udfpsFrameworkDimming
+    )
+
+    private val udfpsHelper: UdfpsHelper? = if (useFrameworkDimming) {
+        UdfpsHelper(context, windowManager, shadeInteractor, requestReason)
+    } else {
+        null
+    }
+
+    private val coreLayoutParams = WindowManager.LayoutParams(
+        WindowManager.LayoutParams.TYPE_NAVIGATION_BAR_PANEL,
+        0 /* flags set in computeLayoutParams() */,
+        PixelFormat.TRANSLUCENT
+    ).apply {
+        title = TAG
+        fitInsetsTypes = 0
+        gravity = android.view.Gravity.TOP or android.view.Gravity.LEFT
+        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        flags = (Utils.FINGERPRINT_OVERLAY_LAYOUT_PARAM_FLAGS or
+                WindowManager.LayoutParams.FLAG_SPLIT_TOUCH)
+        privateFlags = WindowManager.LayoutParams.PRIVATE_FLAG_TRUSTED_OVERLAY or
+                WindowManager.LayoutParams.PRIVATE_FLAG_EXCLUDE_FROM_SCREEN_MAGNIFICATION
+        // Avoid announcing window title.
+        accessibilityTitle = " "
+        inputFeatures = WindowManager.LayoutParams.INPUT_FEATURE_SPY
+    }
 
     /** If the overlay is currently showing. */
     val isShowing: Boolean
@@ -299,6 +304,7 @@ constructor(
     }
 
     private fun addViewNowOrLater(view: View, animation: UdfpsAnimationViewController<*>?) {
+        udfpsHelper?.addDimLayer()
         if (udfpsViewPerformance()) {
             addViewRunnable = kotlinx.coroutines.Runnable {
                 Trace.setCounter("UdfpsAddView", 1)
@@ -464,6 +470,7 @@ constructor(
         if (DeviceEntryUdfpsRefactor.isEnabled) {
             udfpsDisplayModeProvider.disable(null)
         }
+        udfpsHelper?.removeDimLayer()
         getTouchOverlay()?.apply {
             if (this.parent != null) {
                 windowManager.removeView(this)
